@@ -33,7 +33,7 @@ from enum import Enum
 
 # Type alias for URL matching
 UrlMatcher = Union[str, Callable[[str], bool], List[Union[str, Callable[[str], bool]]]]
-
+BeforeParseSitemap = Callable[[str], bytes]
 
 class MatchMode(Enum):
     OR = "or"
@@ -1902,6 +1902,7 @@ class SeedingConfig:
         score_threshold: Optional[float] = None,
         scoring_method: str = "bm25",
         filter_nonsense_urls: bool = True,
+        before_parse_sitemap: Optional[BeforeParseSitemap] = None
     ):
         """
         Initialize URL seeding configuration.
@@ -1937,6 +1938,7 @@ class SeedingConfig:
                           Future: "semantic". Default: "bm25"
             filter_nonsense_urls: Filter out utility URLs like robots.txt, sitemap.xml, 
                                  ads.txt, favicon.ico, etc. Default: True
+            before_parse_sitemap: Filter out sitemap content if needed before parsing. Default: None
         """
         self.source = source
         self.pattern = pattern
@@ -1953,6 +1955,7 @@ class SeedingConfig:
         self.score_threshold = score_threshold
         self.scoring_method = scoring_method
         self.filter_nonsense_urls = filter_nonsense_urls
+        self.before_parse_sitemap = before_parse_sitemap
 
     # Add to_dict, from_kwargs, and clone methods for consistency
     def to_dict(self) -> Dict[str, Any]:

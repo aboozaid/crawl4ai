@@ -31,6 +31,7 @@ from urllib.parse import quote, urljoin
 
 import httpx
 import fnmatch
+
 try:
     from lxml import html as lxml_html
     from lxml import etree
@@ -57,7 +58,7 @@ from .async_logger import AsyncLoggerBase, AsyncLogger
 # Import SeedingConfig for type hints
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .async_configs import SeedingConfig
+    from .async_configs import SeedingConfig, BeforeParseSitemap
 
 
 # ────────────────────────────────────────────────────────────────────────── consts
@@ -294,6 +295,7 @@ class AsyncUrlSeeder:
         query = config.query
         score_threshold = config.score_threshold
         scoring_method = config.scoring_method
+        before_parse_sitemap = config.before_parse_sitemap
 
         # Ensure seeder's logger verbose matches the config's verbose if it's set
         if self.logger and hasattr(self.logger, 'verbose') and config.verbose is not None:
@@ -328,7 +330,7 @@ class AsyncUrlSeeder:
         async def gen():
             if "sitemap" in sources:
                 self._log("debug", "Fetching from sitemaps...", tag="URL_SEED")
-                async for u in self._from_sitemaps(domain, pattern, force):
+                async for u in self._from_sitemaps(domain, pattern, force, before_parse_sitemap):
                     yield u
             if "cc" in sources:
                 self._log("debug", "Fetching from Common Crawl...",
@@ -689,7 +691,7 @@ class AsyncUrlSeeder:
             r = await self.client.head(url, timeout=10, follow_redirects=False)
 
             # direct hit
-            if 200 <= r.status_code < 300:
+            if 200 <= r.status_code < 300 and str(r.headers.get("content-type")).find("xml") != -1:
                 return str(r.url)
 
             # single level redirect
@@ -762,7 +764,7 @@ class AsyncUrlSeeder:
                 raise
 
     # ─────────────────────────────── Sitemaps
-    async def _from_sitemaps(self, domain: str, pattern: str, force: bool = False):
+    async def _from_sitemaps(self, domain: str, pattern: str, force: bool = False, before_parse_fn: BeforeParseSitemap = None):
         """
         1. Probe default sitemap locations.
         2. If none exist, parse robots.txt for alternative sitemap URLs.
@@ -798,7 +800,7 @@ class AsyncUrlSeeder:
                     self._log("info", "Found sitemap at {url}", params={
                               "url": sm}, tag="URL_SEED")
                     async with aiofiles.open(path, "w") as fp:
-                        async for u in self._iter_sitemap(sm):
+                        async for u in self._iter_sitemap(sm, before_parse_fn):
                             await fp.write(u + "\n")
                             if _match(u, pattern):
                                 yield u
@@ -822,12 +824,12 @@ class AsyncUrlSeeder:
         if sitemap_lines:
             async with aiofiles.open(path, "w") as fp:
                 for sm in sitemap_lines:
-                    async for u in self._iter_sitemap(sm):
+                    async for u in self._iter_sitemap(sm, before_parse_fn):
                         await fp.write(u + "\n")
                         if _match(u, pattern):
                             yield u
 
-    async def _iter_sitemap(self, url: str):
+    async def _iter_sitemap(self, url: str, before_parse_fn: BeforeParseSitemap = None):
         try:
             r = await self.client.get(url, timeout=15, follow_redirects=True)
             r.raise_for_status()
@@ -854,6 +856,9 @@ class AsyncUrlSeeder:
             if not normalized:
                 return None
             return normalized
+
+        if before_parse_fn is not None:
+            data = before_parse_fn(data.decode(errors='ignore'))
 
         # Detect if this is a sitemap index by checking for <sitemapindex> or presence of <sitemap> elements
         is_sitemap_index = False
@@ -973,7 +978,7 @@ class AsyncUrlSeeder:
                     self._log(
                         "debug", "Processing sub-sitemap: {url}", params={"url": sitemap_url}, tag="URL_SEED")
                     # Recursively process sub-sitemap
-                    async for u in self._iter_sitemap(sitemap_url):
+                    async for u in self._iter_sitemap(sitemap_url, before_parse_fn):
                         await result_queue.put(u)  # Will block if queue is full
                 except Exception as e:
                     self._log("error", "Error processing sub-sitemap {url}: {error}",
