@@ -79,13 +79,35 @@ _link_rx = re.compile(
 # ────────────────────────────────────────────────────────────────────────── helpers
 
 
+# def _match(url: str, pattern: str) -> bool:
+#     if fnmatch.fnmatch(url, pattern):
+#         return True
+#     canon = url.split("://", 1)[-1]
+#     return (fnmatch.fnmatch(canon, pattern)
+#             or (canon.startswith("www.") and fnmatch.fnmatch(canon[4:], pattern)))
 def _match(url: str, pattern: str) -> bool:
+    # Check if pattern contains regex special characters
+    regex_chars = r'[$()+.[\]^{|}]'
+    is_regex = bool(re.search(regex_chars, pattern))
+    
+    if is_regex:
+        # Use regex matching
+        try:
+            # if re.search(pattern, url):
+            #     return True
+            canon = url.split("://", 1)[-1]
+            return (re.search(pattern, canon) or 
+                    (canon.startswith("www.") and re.search(pattern, canon[4:])))
+        except re.error:
+            # If regex is invalid, fall back to fnmatch
+            pass
+    
+    # Use fnmatch for wildcard patterns
     if fnmatch.fnmatch(url, pattern):
         return True
     canon = url.split("://", 1)[-1]
-    return (fnmatch.fnmatch(canon, pattern)
-            or (canon.startswith("www.") and fnmatch.fnmatch(canon[4:], pattern)))
-
+    return (fnmatch.fnmatch(canon, pattern) or 
+            (canon.startswith("www.") and fnmatch.fnmatch(canon[4:], pattern)))
 
 def _parse_head(src: str) -> Dict[str, Any]:
     if LXML:
@@ -296,6 +318,7 @@ class AsyncUrlSeeder:
         score_threshold = config.score_threshold
         scoring_method = config.scoring_method
         before_parse_sitemap = config.before_parse_sitemap
+        suffixes = config.suffixes or ('/sitemap.xml', '/sitemap_index.xml')
 
         # Ensure seeder's logger verbose matches the config's verbose if it's set
         if self.logger and hasattr(self.logger, 'verbose') and config.verbose is not None:
@@ -330,7 +353,7 @@ class AsyncUrlSeeder:
         async def gen():
             if "sitemap" in sources:
                 self._log("debug", "Fetching from sitemaps...", tag="URL_SEED")
-                async for u in self._from_sitemaps(domain, pattern, force, before_parse_sitemap):
+                async for u in self._from_sitemaps(domain, pattern, suffixes, force, before_parse_sitemap):
                     yield u
             if "cc" in sources:
                 self._log("debug", "Fetching from Common Crawl...",
@@ -764,7 +787,7 @@ class AsyncUrlSeeder:
                 raise
 
     # ─────────────────────────────── Sitemaps
-    async def _from_sitemaps(self, domain: str, pattern: str, force: bool = False, before_parse_fn: BeforeParseSitemap = None):
+    async def _from_sitemaps(self, domain: str, pattern: str, suffixes: tuple[str], force: bool = False, before_parse_fn: BeforeParseSitemap = None):
         """
         1. Probe default sitemap locations.
         2. If none exist, parse robots.txt for alternative sitemap URLs.
@@ -793,7 +816,7 @@ class AsyncUrlSeeder:
 
         schemes = ('https', 'http')  # prefer TLS, downgrade if needed
         for scheme in schemes:
-            for suffix in ("/sitemap.xml", "/sitemap_index.xml"):
+            for suffix in suffixes:
                 sm = f"{scheme}://{host}{suffix}"
                 sm = await self._resolve_head(sm)
                 if sm:

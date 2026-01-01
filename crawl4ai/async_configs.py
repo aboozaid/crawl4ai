@@ -1902,7 +1902,8 @@ class SeedingConfig:
         score_threshold: Optional[float] = None,
         scoring_method: str = "bm25",
         filter_nonsense_urls: bool = True,
-        before_parse_sitemap: Optional[BeforeParseSitemap] = None
+        before_parse_sitemap: Optional[BeforeParseSitemap] = None,
+        suffixes: tuple[str] = None
     ):
         """
         Initialize URL seeding configuration.
@@ -1956,6 +1957,7 @@ class SeedingConfig:
         self.scoring_method = scoring_method
         self.filter_nonsense_urls = filter_nonsense_urls
         self.before_parse_sitemap = before_parse_sitemap
+        self.suffixes = suffixes
 
     # Add to_dict, from_kwargs, and clone methods for consistency
     def to_dict(self) -> Dict[str, Any]:
